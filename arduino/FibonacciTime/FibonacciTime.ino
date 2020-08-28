@@ -17,7 +17,7 @@ FASTLED_USING_NAMESPACE
 
 
 
-#define DATA_PIN    A5
+#define DATA_PIN    21
 #define LED_TYPE    WS2812
 #define pi         3.14159
 //#define CLK_PIN   19
@@ -43,9 +43,6 @@ void setup() {
   // set master brightness control
   FastLED.setBrightness(BRIGHTNESS);
   FastLED.setMaxPowerInMilliWatts(2000);
-  pinMode(A0, INPUT_PULLUP);
-  pinMode(A1, OUTPUT);
-  digitalWrite(A1, LOW);
 }
 
 
