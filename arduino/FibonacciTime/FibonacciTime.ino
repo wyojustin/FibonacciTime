@@ -1,4 +1,5 @@
 #include <Time.h>
+#include <Wire.h>
 #include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <NTPClient.h>
@@ -80,6 +81,7 @@ void wifi_setup(){
 }
 
 void setup() {
+  Wire.begin();
   Serial.begin(115200);
   Serial.println("WyoLum.com!");
   // tell FastLED about the LED strip configuration
@@ -90,7 +92,7 @@ void setup() {
   FastLED.setBrightness(BRIGHTNESS);
   FastLED.setMaxPowerInMilliWatts(2000);
   wifi_setup();
-  //set_timezone_from_ip();
+  set_timezone_from_ip();
 }
 
 
