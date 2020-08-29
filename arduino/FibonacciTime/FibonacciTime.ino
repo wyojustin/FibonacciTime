@@ -45,6 +45,8 @@ CRGB leds[NUM_LEDS];
 #define FRAMES_PER_SECOND  120
 
 WiFiManager wifiManager;
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "us.pool.ntp.org", 0, 60000); //Default
 
 NTPClock ntp_clock;
 DS3231Clock ds3231_clock;
@@ -66,14 +68,47 @@ struct config_t{
 } config;
 
 
+bool setup_complete = false;
+
+void print_config(){
+  Serial.println("config:");
+  Serial.print("    timezone:"); Serial.println(config.timezone);
+  Serial.print("    brightness:"); Serial.println(config.brightness);
+  Serial.print("    display_idx:"); Serial.println(config.display_idx);
+  Serial.print("    factory_reset:"); Serial.println(config.factory_reset);
+  Serial.print("    use_wifi:"); Serial.println(config.use_wifi);
+  Serial.print("    use_ip_timezone:"); Serial.println(config.use_ip_timezone);
+  Serial.print("    mqtt_ip:");
+  for(int ii = 0; ii < 4; ii++){
+    if (ii > 0){
+      Serial.print(".");
+    }
+    Serial.print(config.mqtt_ip[ii]);
+  }
+  Serial.println();
+  Serial.print("    flip_display:"); Serial.println(config.flip_display);
+  Serial.print("    last_tz_lookup:"); Serial.println(config.last_tz_lookup);
+  Serial.print("    solid_color_rgb:");
+  for(int ii = 0; ii < 3; ii++){
+    if (ii > 0){
+      Serial.print(".");
+    }
+    Serial.print(config.solid_color_rgb[ii]);
+  }
+  Serial.println();
+  Serial.print("    use_ntp_time:"); Serial.println(config.use_ntp_time);
+  Serial.print("    wifi_reset:"); Serial.println(config.wifi_reset);
+  Serial.print("    faceplate_idx:"); Serial.println(config.faceplate_idx);
+}
+
 void wifi_setup(){
   if(config.wifi_reset){
     config.wifi_reset = false;
     saveSettings();
-    wifiManager.startConfigPortal("KLOK");
+    wifiManager.startConfigPortal("Fibonacci");
   }
   else{
-    wifiManager.autoConnect("KLOK");
+    wifiManager.autoConnect("Fibonacci");
   }
   Serial.println("Yay connected!");
   Serial.println("IP address: ");
@@ -92,6 +127,12 @@ void setup() {
   FastLED.setBrightness(BRIGHTNESS);
   FastLED.setMaxPowerInMilliWatts(2000);
   wifi_setup();
+
+  ntp_clock.setup(&timeClient);
+  ntp_clock.setOffset(config.timezone);
+  ds3231_clock.set(ntp_clock.now());
+  doomsday_clock.setup(&ntp_clock, &ds3231_clock);
+  
   set_timezone_from_ip();
 }
 
@@ -176,13 +217,19 @@ void draw_right_arm(uint8_t idx){
 
 void draw_hour_hand(unsigned long long t){
   float minutes = t / 60.;
-  int hh = (t / 3600) % 12;
   int led;
   float theta = (2 * pi * minutes) / (720);
   
   uint8_t idx = 21 * theta / (2 * pi);
   draw_left_arm(idx + 2);
-  
+}
+
+void draw_hour_edge(unsigned long long t){
+  float minutes = t / 60.;
+  int hh = (t / 3600) % 12;
+  int led;
+  float theta = (2 * pi * minutes) / (720);
+    
   // edge lighting
   for(int i = 0; i < 7; i++){
     led = hh * 7 + 17 + i;
@@ -192,12 +239,17 @@ void draw_hour_hand(unsigned long long t){
 }
 
 void draw_minute_hand(unsigned long long t){
-  int led, mm;
   float theta = 2 * pi * t / 3600;
   uint8_t idx = 13 * theta / (2 * pi);
   idx %= 13;
   
   draw_right_arm(idx);
+}
+
+void draw_minute_edge(unsigned long long t){
+  int led, mm;
+  float theta = 2 * pi * t / 3600;
+  uint8_t idx = 13 * theta / (2 * pi);
 
   // edge lighting
   mm = (theta * NUM_RING) / (2 * pi);
@@ -210,26 +262,59 @@ void draw_minute_hand(unsigned long long t){
   
 }
 
-void draw_seconds(unsigned long long t, uint16_t ms){
+void draw_seconds_edge(unsigned long long t, uint16_t ms){
   uint8_t idx;
-  float theta = 2 * pi * (t + ms / 1000.) / 60.;
-  
-  idx = NUM_RING * theta / (2 * pi) + 20;
+  float theta = 2 * pi * ((t % 60) + ms / 1000.) / 60.;
+  idx = NUM_RING * theta / (2 * pi) + 23;
   idx %= NUM_RING;
   leds[NUM_CENTER + idx] += CRGB::White/8;
 }
 
 
+uint32_t Now(){
+  uint32_t out;
+
+  if(config.use_wifi){
+    if(config.use_ntp_time){
+      if(setup_complete){
+	out = doomsday_clock.now();
+      }
+      else{
+	out = 0;
+      }
+      if(weekday(out) == 1){ // refresh utc offset sunday between 3:02 and 3:59 AM
+	if(hour(out) == 3){
+	  if(minute(out) > 1){ 
+	    if(doomsday_clock.gmt() - config.last_tz_lookup > 86400 -2 * 60){// at most one update per day
+	      Serial.print(" Check DST!! ");
+	      Serial.print(hour(out));Serial.print(":");
+	      Serial.print(minute(out));Serial.print("\n");
+	      set_timezone_from_ip();
+	    }
+	  }
+	}
+      }
+    }
+    else{
+      out = ds3231_clock.now();
+    }
+  }
+  else{
+    out = ds3231_clock.now();
+  }
+  return out;
+}
+
 void simple_clock(){
   unsigned long long t;
   uint16_t ms;
   
-  t = 1 * millis()  / 1000 + 12000;
-  ms = millis() % 1000;
+  t = Now();
+  ms = 0;
   off();
-  draw_hour_hand(t);
-  draw_minute_hand(t);
-  //draw_seconds(t, ms);
+  draw_hour_edge(t);
+  draw_minute_edge(t);
+  draw_seconds_edge(t, ms);
   delay(100);
 }
 
@@ -326,12 +411,17 @@ void set_timezone_from_ip(){
 	Serial.print("Local:");Serial.println(local);
 	ds3231_clock.set(local);
       }
+      Serial.print("test 1::");
+      Serial.println((int)doomsday_clock.master);
       if(doomsday_clock.master->initialized){
+	Serial.println("test 1.1");
 	Serial.println("NTP is clock alive!");
       }
       else{
+	Serial.println("test 1.2");
 	Serial.println("No NTP, fall back to DS3231");
       }
+      Serial.println("test 2");
       Serial.println();
       if(config.use_ip_timezone){
 	Serial.print("timezone_offset String:");
@@ -368,25 +458,25 @@ void clock_test(){
     }
     for(i = 0; i < 3600 * 2; i+= 60){
       off();
-      draw_minute_hand(i);
+      draw_minute_edge(i);
       FastLED.show();
       delay(100);
     }
-    draw_minute_hand(0);
+    draw_minute_edge(0);
     delay(5000);
     for(i = 0; i < 60; i++){
       off();
-      draw_seconds(i, i * 1000/60.);
+      draw_seconds_edge(i, i * 1000/60.);
       FastLED.show();
       delay(10);
     }
     delay(1000);
     for(i = 0; i < (unsigned long long)12 * 3600; i+= 60){
       off();
-      draw_hour_hand(i);
+      draw_hour_edge(i);
       FastLED.show();
     }
-    draw_hour_hand(0);
+    draw_hour_edge(0);
     delay(4000);
   }
 }
