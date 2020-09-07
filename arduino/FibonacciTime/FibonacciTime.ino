@@ -10,6 +10,7 @@
 #include "FastLED.h"
 #include "get_time.h"
 #include "config.h"
+#include "fibonacci.h"
 
 FASTLED_USING_NAMESPACE
 
@@ -27,21 +28,92 @@ FASTLED_USING_NAMESPACE
 #endif
 
 
-
 #define DATA_PIN    4 //32 //21
 #define LED_TYPE    WS2812
 #define pi         3.14159
 //#define CLK_PIN   19
 //#define LED_TYPE    APA102
 
-#define COLOR_ORDER GRB
-#define NUM_RING     84
-#define NUM_CENTER  256
-#define NUM_LEDS    (NUM_RING + NUM_CENTER)
+#define COLOR_ORDER     GRB
+#define NUM_EDGE         84
+#define NUM_CENTER      256
+#define NUM_LEDS       (NUM_EDGE + NUM_CENTER)
+#define FADE_INDEX_LEN 193
+
+CRGBPalette16 palette = OceanColors_p;
+
+uint8_t fade[FADE_INDEX_LEN] = {0, // remain off indef, setting index to one starts automated increments
+  1,   1,   1,   1,   1,   1,   1,   1,   1,   2,   2,   2,   2,
+  3,   3,   3,   3,   4,   4,   5,   5,   6,   6,   7,   7,   8,
+  9,  10,  11,  12,  13,  14,  15,  17,  18,  20,  22,  24,  26,
+  29,  31,  34,  37,  41,  45,  49,  53,  58,  63,  69,  75,  82,
+  90,  98, 107, 116, 127, 139, 151, 165, 180, 196, 214, 233, 255,
+  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 233, 214,
+  196, 180, 165, 151, 139, 127, 116, 107,  98,  90,  82,  75,  69,
+  63,  58,  53,  49,  45,  41,  37,  34,  31,  29,  26,  24,  22,
+  20,  18,  17,  15,  14,  13,  12,  11,  10,   9,   8,   7,   7,
+  6,   6,   5,   5,   4,   4,   3,   3,   3,   3,   2,   2,   2,
+  2,   1,   1,   1,   1,   1,   1,   1,   1,   1};
 
 CRGB leds[NUM_LEDS];
+CHSV hsv_leds[NUM_CENTER];
+uint8_t fade_index[NUM_CENTER];
+void increment_fade(){
+  //Serial.println(fade_index[0]);
+  for(int i = 0; i < NUM_CENTER; i++){
+    if(0 < fade_index[i]){
+      float x = pixel_x[i] - cx;
+      float y = pixel_y[i] - cy;
+      float theta = atan2(y, x);
+      if(theta < 0){
+	theta += 2 * PI;
+      }
+      
+      fade_index[i] += 1;
+      fade_index[i] %= FADE_INDEX_LEN;
+      hsv_leds[i].hue = (uint8_t)(theta * 256 / (2 * PI)) + millis()/100 % 256;
+      hsv_leds[i].value = fade[fade_index[i]]/4;
+      //leds[i + 1] = hsv_leds[i];
 
-#define BRIGHTNESS          255
+      leds[i + 1] = ColorFromPalette(palette, hsv_leds[i].hue, fade[fade_index[i]]/4);
+    }
+  }
+}
+
+void set_absolute(uint16_t i, const struct CRGB& color){
+  if(i < NUM_LEDS){
+    leds[i] = color;
+  }
+}
+void set_edge(uint16_t i, const struct CRGB& color){
+  uint16_t led = 1 + NUM_CENTER + i;
+  set_absolute(led, color);
+}
+void set_fibonacci(uint16_t i, const struct CRGB& color){
+  if(i < 256){
+    set_absolute(1 + fibindex[i], color);
+  }
+}
+void add_absolute(uint16_t i, const struct CRGB& color){
+  if(i < NUM_LEDS){
+    leds[i] += color;
+  }
+}
+void add_edge(uint16_t i, const struct CRGB& color){
+  uint16_t led = 1 + NUM_CENTER + i;
+  set_absolute(led, color);
+}
+void add_fibonacci(uint16_t i, const struct CRGB& color){
+  if(i < 256){
+    set_absolute(1 + fibindex[i], color);
+  }
+}
+
+#define BRIGHTNESS          96
 #define FRAMES_PER_SECOND  120
 
 WiFiManager wifiManager;
@@ -115,10 +187,16 @@ void wifi_setup(){
   Serial.println(WiFi.localIP());
 }
 
+uint32_t last_second = 0;
+uint32_t first_change_ms = 0;
+uint32_t last_change_ms = 0;
+uint32_t number_of_seconds = 0;
+
 void setup() {
   Wire.begin();
   Serial.begin(115200);
   Serial.println("WyoLum.com!");
+  delay(6000);
   // tell FastLED about the LED strip configuration
   FastLED.addLeds<LED_TYPE,DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).
     setCorrection(TypicalLEDStrip);
@@ -134,6 +212,13 @@ void setup() {
   doomsday_clock.setup(&ntp_clock, &ds3231_clock);
   
   set_timezone_from_ip();
+  last_second = ds3231_clock.now();
+  while(last_second == ds3231_clock.now()){
+  }
+  number_of_seconds = 0;
+  first_change_ms = millis();
+  last_second = Now();
+  last_change_ms = millis();
 }
 
 
@@ -153,16 +238,27 @@ void loop()
   FastLED.delay(1000/FRAMES_PER_SECOND); 
 
   // do some periodic updates
-  EVERY_N_MILLISECONDS( 20 ) { gHue++; }
+  EVERY_N_MILLISECONDS( 20 ) {
+    gHue++;
+  }
+  EVERY_N_MILLISECONDS(1) {
+    increment_fade();
+  }
+  EVERY_N_MILLISECONDS(100 ) {
+    fadeToBlackBy(leds + NUM_CENTER + 1, NUM_EDGE, 5);
+  }
 }
 
 #define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
 
 
-void off(){
-  for(int i = 0; i < NUM_LEDS; i++){
+void off(uint16_t start, uint16_t length){
+  for(int i = start; i < start + length; i++){
     leds[i] = CRGB::Black;
   }
+}
+void off(){
+  off(0, NUM_LEDS);
 }
 
 const uint8_t l_arms[21 * 12] = {
@@ -228,14 +324,17 @@ void draw_hour_edge(unsigned long long t){
   float minutes = t / 60.;
   int hh = (t / 3600) % 12;
   int led;
-  float theta = (2 * pi * minutes) / (720);
+  float hh_float = (t / 3600.);
+  hh_float -= (int)(hh_float / 3600) * 3600;
     
   // edge lighting
   for(int i = 0; i < 7; i++){
     led = hh * 7 + 17 + i;
-    led %= NUM_RING;
-    leds[NUM_CENTER + led] += CRGB::Green;
+    led %= NUM_EDGE;
+    add_edge(led, CRGB::Cyan);
   }
+  led = (int)(hh_float * 7 + 17) % NUM_EDGE;
+  add_edge(led, CRGB::White);
 }
 
 void draw_minute_hand(unsigned long long t){
@@ -248,16 +347,15 @@ void draw_minute_hand(unsigned long long t){
 
 void draw_minute_edge(unsigned long long t){
   int led, mm;
-  float theta = 2 * pi * t / 3600;
-  uint8_t idx = 13 * theta / (2 * pi);
+  float theta = (2 * pi * (t % 86400)) / 3600;
 
   // edge lighting
-  mm = (theta * NUM_RING) / (2 * pi);
-  mm %= NUM_RING;
-  for(int i = 0; i < 7; i++){
+  mm = (theta * NUM_EDGE) / (2 * pi);
+  mm %= NUM_EDGE;
+  for(int i = 2; i < 5; i++){
     led = mm + 17 + i;
-    led %= NUM_RING;
-    leds[NUM_CENTER + led] += CRGB::Blue;
+    led %= NUM_EDGE;
+    add_edge(led, CRGB(0, 255, 32));
   }
   
 }
@@ -265,11 +363,10 @@ void draw_minute_edge(unsigned long long t){
 void draw_seconds_edge(unsigned long long t, uint16_t ms){
   uint8_t idx;
   float theta = 2 * pi * ((t % 60) + ms / 1000.) / 60.;
-  idx = NUM_RING * theta / (2 * pi) + 23;
-  idx %= NUM_RING;
-  leds[NUM_CENTER + idx] += CRGB::White/8;
+  idx = NUM_EDGE * theta / (2 * pi) + 23;
+  idx %= NUM_EDGE;
+  add_edge(idx, CRGB::Blue);
 }
-
 
 uint32_t Now(){
   uint32_t out;
@@ -302,7 +399,44 @@ uint32_t Now(){
   else{
     out = ds3231_clock.now();
   }
+  if(out != last_second){
+    last_second = out;
+    //Serial.print("millis() - last_change_ms");Serial.println(millis() - last_change_ms);
+    last_change_ms = millis();
+  }
   return out;
+}
+
+void seconds(uint32_t t, uint16_t ms){//21
+  t %= 86400;
+  t = t * 1000 + ms;
+  
+  uint32_t row = t /2857.1428571428573 + 15;
+  /*
+  for(int i = 0; i < 12; i++){
+    //set_fibonacci((i * 13 + t) % NUM_CENTER, ColorFromPalette(palette, gHue+(i*2), gHue+(i*1)));
+    set_fibonacci((i * 21 + (-8*t)%21) % NUM_CENTER, CHSV(i * 8 + gHue, 255, 255));
+    
+  }
+  */
+  uint32_t col = ((int)(t * 12 / 2857.1428571428573)) % 12;
+  uint16_t idx = (col * 21 + (-8*row)%21) % NUM_CENTER;
+
+  //set_fibonacci((col * 21 + (-8*row)%21) % NUM_CENTER, CHSV(row * 13 + gHue + col * 10, 255, 255));
+  fade_index[fibindex[idx]] = 1;// kick off fade run
+  hsv_leds[idx] = CHSV(gHue + col*4, 32, 1);
+  set_fibonacci(idx, hsv_leds[idx]);
+}
+void seconds8(uint32_t t, uint16_t ms){//8
+  t %= 86400;
+  t = t * 1000 + ms;
+  
+  float t_step = 60000 / 32.;
+  uint32_t row = t/t_step;
+  uint32_t col = ((int)(t * 32 / t_step)) % 32;
+
+  set_fibonacci((col * 8 + (5*row)%8) % NUM_CENTER, ColorFromPalette(palette, gHue+(col*2), 64));
+  
 }
 
 void simple_clock(){
@@ -310,11 +444,12 @@ void simple_clock(){
   uint16_t ms;
   
   t = Now();
-  ms = 0;
-  off();
+  ms = millis() - last_change_ms;
+  //off(1 + NUM_CENTER, NUM_RING);
   draw_hour_edge(t);
   draw_minute_edge(t);
-  draw_seconds_edge(t, ms);
+  //draw_seconds_edge(t, ms);
+  seconds(t, ms);
   delay(100);
 }
 
@@ -364,7 +499,7 @@ void set_timezone_from_ip(){
     String(WiFi.localIP()[2]) + String('.') + 
     String(WiFi.localIP()[3]) + String('&') +
     String("macaddress=") + WiFi.macAddress() + String('&') + 
-    String("dev_type=ClockIOT");
+    String("dev_type=FibonacciTime");
   Serial.println(url);
   http.begin(url);
   
@@ -447,13 +582,11 @@ void set_timezone_from_ip(){
 void clock_test(){
   unsigned long long i, j, k, led, hh, mm, ss;
   uint32_t now = millis();
-  CRGBPalette16 palette = PartyColors_p;
   while(1){
     for(i = 0; i < 13; i++){
       off();
       draw_right_arm(i);
       FastLED.show();
-      Serial.println((int)i);
       delay(100);
     }
     for(i = 0; i < 3600 * 2; i+= 60){
