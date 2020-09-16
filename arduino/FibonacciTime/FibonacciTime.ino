@@ -77,9 +77,7 @@ void increment_fade(){
       fade_index[i] %= FADE_INDEX_LEN;
       hsv_leds[i].hue = (uint8_t)(theta * 256 / (2 * PI)) + millis()/100 % 256;
       hsv_leds[i].value = fade[fade_index[i]]/4;
-      //leds[i + 1] = hsv_leds[i];
-
-      leds[i + 1] = ColorFromPalette(palette, hsv_leds[i].hue, fade[fade_index[i]]/4);
+      leds[i] = ColorFromPalette(palette, hsv_leds[i].hue, fade[fade_index[i]]/4);
     }
   }
 }
@@ -90,12 +88,12 @@ void set_absolute(uint16_t i, const struct CRGB& color){
   }
 }
 void set_edge(uint16_t i, const struct CRGB& color){
-  uint16_t led = 1 + NUM_CENTER + i;
+  uint16_t led = NUM_CENTER + i;
   set_absolute(led, color);
 }
 void set_fibonacci(uint16_t i, const struct CRGB& color){
   if(i < 256){
-    set_absolute(1 + fibindex[i], color);
+    set_absolute(fibindex[i], color);
   }
 }
 void add_absolute(uint16_t i, const struct CRGB& color){
@@ -104,12 +102,12 @@ void add_absolute(uint16_t i, const struct CRGB& color){
   }
 }
 void add_edge(uint16_t i, const struct CRGB& color){
-  uint16_t led = 1 + NUM_CENTER + i;
-  set_absolute(led, color);
+  uint16_t led = NUM_CENTER + i;
+  add_absolute(led, color);
 }
 void add_fibonacci(uint16_t i, const struct CRGB& color){
   if(i < 256){
-    set_absolute(1 + fibindex[i], color);
+    add_absolute(fibindex[i], color);
   }
 }
 
@@ -182,6 +180,14 @@ void wifi_setup(){
   else{
     wifiManager.autoConnect("Fibonacci");
   }
+  /*
+  Serial.println(ssid);
+  Serial.println(pass);
+  while(WiFi.begin(ssid, pass)!= WL_CONNECTED){
+    Serial.println("Try...");
+    delay(1000);
+  }
+  */
   Serial.println("Yay connected!");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
@@ -245,7 +251,7 @@ void loop()
     increment_fade();
   }
   EVERY_N_MILLISECONDS(100 ) {
-    fadeToBlackBy(leds + NUM_CENTER + 1, NUM_EDGE, 5);
+    fadeToBlackBy(leds + NUM_CENTER, NUM_EDGE, 5);
   }
 }
 
@@ -331,10 +337,10 @@ void draw_hour_edge(unsigned long long t){
   for(int i = 0; i < 7; i++){
     led = hh * 7 + 17 + i;
     led %= NUM_EDGE;
-    add_edge(led, CRGB::Cyan);
+    set_edge(led, CRGB::Cyan);
   }
   led = (int)(hh_float * 7 + 17) % NUM_EDGE;
-  add_edge(led, CRGB::White);
+  set_edge(led, CRGB::White);
 }
 
 void draw_minute_hand(unsigned long long t){
@@ -355,7 +361,7 @@ void draw_minute_edge(unsigned long long t){
   for(int i = 2; i < 5; i++){
     led = mm + 17 + i;
     led %= NUM_EDGE;
-    add_edge(led, CRGB(0, 255, 32));
+    set_edge(led, CRGB(0, 255, 32));
   }
   
 }
@@ -546,17 +552,13 @@ void set_timezone_from_ip(){
 	Serial.print("Local:");Serial.println(local);
 	ds3231_clock.set(local);
       }
-      Serial.print("test 1::");
       Serial.println((int)doomsday_clock.master);
       if(doomsday_clock.master->initialized){
-	Serial.println("test 1.1");
 	Serial.println("NTP is clock alive!");
       }
       else{
-	Serial.println("test 1.2");
-	Serial.println("No NTP, fall back to DS3231");
+Serial.println("No NTP, fall back to DS3231");
       }
-      Serial.println("test 2");
       Serial.println();
       if(config.use_ip_timezone){
 	Serial.print("timezone_offset String:");
